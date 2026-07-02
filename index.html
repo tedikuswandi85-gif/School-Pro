@@ -1,0 +1,750 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SchoolPro - Sistem Manajemen Sekolah</title>
+<meta name="theme-color" content="#1E3A8A">
+
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    darkMode: 'class',
+    theme: {
+      extend: {
+        colors: {
+          primary: { DEFAULT:'#1E3A8A', 50:'#EFF6FF', 100:'#DBEAFE', 700:'#1D4ED8', 800:'#1E40AF', 900:'#1E3A8A' },
+          accent: { DEFAULT:'#F59E0B', 400:'#FBBF24', 500:'#F59E0B', 600:'#D97706' }
+        }
+      }
+    }
+  }
+</script>
+
+<!-- Supabase -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<!-- QR Code - FIXED: pakai qrcode-generator yang reliable -->
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+
+<!-- QR Scanner -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+
+<!-- Charts -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<!-- Export -->
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+<style>
+  body { font-family: 'Inter', system-ui, sans-serif; margin: 0; }
+  .loader { border: 3px solid #f3f3f3; border-top: 3px solid #1E3A8A; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; }
+  @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+  .fade-in { animation: fadeIn 0.3s ease-in; }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  .sidebar-transition { transition: all 0.3s ease; }
+  .error-box { background: #FEF2F2; border: 2px solid #FCA5A5; color: #991B1B; padding: 20px; border-radius: 12px; max-width: 600px; margin: 40px auto; font-family: monospace; }
+  .error-box h2 { color: #DC2626; margin-bottom: 10px; }
+  .warning-box { background: #FFFBEB; border: 2px solid #FCD34D; color: #92400E; padding: 20px; border-radius: 12px; max-width: 600px; margin: 40px auto; }
+</style>
+</head>
+<body class="bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100">
+
+<!-- Loading Screen -->
+<div id="loading-screen" style="position:fixed;inset:0;background:#1E3A8A;display:flex;align-items:center;justify-content:center;z-index:9999;">
+  <div style="text-align:center;color:white;">
+    <div class="loader" style="margin:0 auto 20px;border-top-color:#F59E0B;"></div>
+    <h2 style="font-size:24px;font-weight:bold;">SchoolPro</h2>
+    <p style="opacity:0.8;margin-top:8px;">Memuat aplikasi...</p>
+  </div>
+</div>
+
+<div id="app"></div>
+<div id="toast-container" style="position:fixed;top:16px;right:16px;z-index:9999;"></div>
+<div id="debug-console" style="display:none;position:fixed;bottom:0;left:0;right:0;max-height:300px;overflow-y:auto;background:#1e1e1e;color:#0f0;font-family:monospace;font-size:12px;padding:10px;z-index:99999;"></div>
+
+<script>
+// ============================================================
+// DEBUG SYSTEM
+// ============================================================
+const DEBUG = {
+  logs: [],
+  log(msg, type = 'info') {
+    const time = new Date().toLocaleTimeString();
+    const entry = `[${time}] [${type.toUpperCase()}] ${msg}`;
+    this.logs.push(entry);
+    console.log(`%c[${type.toUpperCase()}]`, 
+      type === 'error' ? 'color:red;font-weight:bold' : 
+      type === 'warn' ? 'color:orange;font-weight:bold' : 
+      'color:blue;font-weight:bold', msg);
+    const dc = document.getElementById('debug-console');
+    if (dc) dc.innerHTML += entry + '<br>';
+  },
+  toggle() {
+    const dc = document.getElementById('debug-console');
+    dc.style.display = dc.style.display === 'none' ? 'block' : 'none';
+  }
+};
+
+document.addEventListener('keydown', (e) => {
+  if (e.ctrlKey && e.shiftKey && e.key === 'D') DEBUG.toggle();
+});
+
+window.onerror = (msg, url, line, col, error) => {
+  DEBUG.log(`ERROR: ${msg} at ${url}:${line}:${col}`, 'error');
+};
+
+window.addEventListener('unhandledrejection', (e) => {
+  DEBUG.log(`Promise Error: ${e.reason}`, 'error');
+});
+
+// ============================================================
+// QR CODE HELPER - pakai qrcode-generator
+// ============================================================
+function generateQRCode(container, text, size = 120) {
+  try {
+    // qrcode-generator API
+    const typeNumber = 4;
+    const errorCorrectionLevel = 'L';
+    const qr = qrcode(typeNumber, errorCorrectionLevel);
+    qr.addData(text);
+    qr.make();
+    
+    // Clear container
+    container.innerHTML = '';
+    
+    // Create image
+    const img = document.createElement('img');
+    img.src = qr.createDataURL(4, 0); // cell size, margin
+    img.width = size;
+    img.height = size;
+    img.style.display = 'block';
+    img.style.margin = '0 auto';
+    container.appendChild(img);
+    
+    return true;
+  } catch (err) {
+    DEBUG.log(`QR generate error: ${err.message}`, 'error');
+    container.innerHTML = '<p style="color:red;font-size:10px;">QR Error</p>';
+    return false;
+  }
+}
+
+// ============================================================
+// ERROR DISPLAY
+// ============================================================
+function showError(title, message) {
+  document.getElementById('loading-screen').style.display = 'none';
+  document.getElementById('app').innerHTML = `
+    <div class="error-box">
+      <h2>❌ ${title}</h2>
+      <p>${message}</p>
+      <p style="margin-top:15px;"><strong>Tekan Ctrl+Shift+D</strong> untuk debug console</p>
+    </div>
+  `;
+}
+
+// ============================================================
+// CHECK DEPENDENCIES - FIXED
+// ============================================================
+function checkDependencies() {
+  DEBUG.log('Checking dependencies...', 'info');
+  const missing = [];
+  
+  if (typeof window.supabase === 'undefined') missing.push('Supabase JS');
+  if (typeof qrcode === 'undefined') missing.push('QRCode Generator');
+  if (typeof Chart === 'undefined') missing.push('Chart.js');
+  if (typeof XLSX === 'undefined') missing.push('XLSX library');
+  
+  // html5-qrcode optional (hanya untuk scan)
+  const hasScanner = typeof Html5Qrcode !== 'undefined';
+  DEBUG.log(`QR Scanner available: ${hasScanner}`, hasScanner ? 'success' : 'warn');
+  
+  if (missing.length > 0) {
+    DEBUG.log(`Missing: ${missing.join(', ')}`, 'error');
+    showError('Library Tidak Terload', `
+      Library berikut gagal dimuat:<br>
+      <ul style="margin:10px 0;">
+        ${missing.map(m => `<li>❌ ${m}</li>`).join('')}
+      </ul>
+      <p><strong>Solusi:</strong></p>
+      <ol style="margin-left:20px;">
+        <li>Pastikan internet aktif</li>
+        <li>Cek apakah ada adblocker yang memblokir CDN</li>
+        <li>Coba refresh halaman (Ctrl+F5)</li>
+        <li>Coba browser lain (Chrome/Edge/Firefox)</li>
+      </ol>
+    `);
+    return false;
+  }
+  
+  DEBUG.log('All dependencies loaded ✓', 'success');
+  return true;
+}
+
+// ============================================================
+// CONFIG - GANTI DENGAN DATA ANDA
+// ============================================================
+const CONFIG = {
+  SUPABASE_URL: 'https://mputpwqctbjndgwspelp.supabase.co',     // ← GANTI
+  SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1wdXRwd3FjdGJqbmRnd3NwZWxwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI5NjEwNjEsImV4cCI6MjA5ODUzNzA2MX0.3qgf53y1eqWoXlY1rHZg-KubcXza9zISf-P7w14FM0w',              // ← GANTI
+  SCHOOL_NAME: 'SMA Negeri 1'
+};
+
+// ============================================================
+// STATE
+// ============================================================
+const state = {
+  user: null,
+  profile: null,
+  currentPage: 'dashboard',
+  darkMode: localStorage.getItem('darkMode') === 'true',
+  sidebarOpen: window.innerWidth >= 1024,
+  data: { teachers: [], classes: [], students: [], subjects: [] }
+};
+
+if (state.darkMode) document.documentElement.classList.add('dark');
+
+const $ = (sel) => document.querySelector(sel);
+const $$ = (sel) => document.querySelectorAll(sel);
+
+function toast(msg, type = 'info') {
+  DEBUG.log(`Toast: ${msg} (${type})`, type === 'error' ? 'error' : 'info');
+  const colors = {
+    success: 'background:#10B981', error: 'background:#EF4444',
+    warning: 'background:#F59E0B', info: 'background:#1E3A8A'
+  };
+  const t = document.createElement('div');
+  t.style.cssText = `${colors[type]};color:white;padding:12px 20px;border-radius:8px;margin-bottom:8px;box-shadow:0 4px 12px rgba(0,0,0,0.15);animation:fadeIn 0.3s;min-width:250px;`;
+  t.textContent = msg;
+  document.getElementById('toast-container').appendChild(t);
+  setTimeout(() => { t.style.opacity = '0'; t.style.transition = 'opacity 0.3s'; setTimeout(() => t.remove(), 300); }, 3000);
+}
+
+function formatDate(d) {
+  if (!d) return '-';
+  return new Date(d).toLocaleDateString('id-ID', { day:'2-digit', month:'short', year:'numeric' });
+}
+
+// ============================================================
+// INIT APP
+// ============================================================
+async function initApp() {
+  DEBUG.log('App initializing...', 'info');
+  
+  try {
+    if (!checkDependencies()) return;
+    
+    DEBUG.log('Checking config...', 'info');
+    if (CONFIG.SUPABASE_URL.includes('YOUR-PROJECT') || CONFIG.SUPABASE_ANON_KEY.includes('YOUR-ANON')) {
+      document.getElementById('loading-screen').style.display = 'none';
+      document.getElementById('app').innerHTML = `
+        <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;background:linear-gradient(135deg,#1E3A8A,#1D4ED8);">
+          <div style="background:white;border-radius:16px;padding:30px;max-width:600px;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+            <h1 style="color:#DC2626;font-size:24px;margin-bottom:15px;">⚠️ Konfigurasi Belum Diisi</h1>
+            <p style="margin-bottom:15px;">Edit file <code style="background:#F3F4F6;padding:2px 6px;border-radius:4px;">schoolpro.html</code> dan isi:</p>
+            <ol style="margin-left:20px;line-height:2;">
+              <li><code>SUPABASE_URL</code> → dari Supabase → Settings → API → Project URL</li>
+              <li><code>SUPABASE_ANON_KEY</code> → dari halaman yang sama → anon public</li>
+            </ol>
+            <div style="margin-top:15px;padding:15px;background:#FEF2F2;border-radius:8px;border-left:4px solid #EF4444;">
+              <strong>⚠️ Penting:</strong> Pastikan sudah menjalankan SQL Schema di SQL Editor Supabase.
+            </div>
+          </div>
+        </div>
+      `;
+      return;
+    }
+    
+    DEBUG.log('Initializing Supabase...', 'info');
+    window.supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+    
+    DEBUG.log('Testing connection...', 'info');
+    const { error: testError } = await window.supabaseClient.from('profiles').select('id', { count: 'exact', head: true });
+    
+    if (testError) {
+      DEBUG.log(`Connection failed: ${testError.message}`, 'error');
+      let helpMsg = `<p>Error: ${testError.message}</p>`;
+      if (testError.message.includes('does not exist') || testError.message.includes('relation')) {
+        helpMsg = `
+          <p><strong>Tabel belum dibuat!</strong></p>
+          <ol style="margin-left:20px;">
+            <li>Buka Supabase Dashboard → SQL Editor</li>
+            <li>Copy SQL Schema dari panduan</li>
+            <li>Klik Run → tunggu "Success"</li>
+            <li>Refresh halaman ini</li>
+          </ol>
+        `;
+      }
+      showError('Gagal Koneksi ke Supabase', helpMsg);
+      return;
+    }
+    
+    DEBUG.log('Connection OK ✓', 'success');
+    
+    const { data: { session } } = await window.supabaseClient.auth.getSession();
+    
+    document.getElementById('loading-screen').style.display = 'none';
+    
+    if (session) {
+      DEBUG.log(`User: ${session.user.email}`, 'info');
+      await loadProfile(session.user);
+      renderApp();
+    } else {
+      DEBUG.log('No session, showing login', 'info');
+      renderLogin();
+    }
+    
+  } catch (err) {
+    DEBUG.log(`Init error: ${err.message}`, 'error');
+    showError('Error', `<p>${err.message}</p><pre>${err.stack || ''}</pre>`);
+  }
+}
+
+// ============================================================
+// AUTH
+// ============================================================
+async function loadProfile(user) {
+  state.user = user;
+  const { data: profile } = await window.supabaseClient
+    .from('profiles').select('*').eq('id', user.id).single();
+  
+  if (!profile) {
+    const isFirst = (await window.supabaseClient.from('profiles').select('id', { count: 'exact', head: true })).count === 0;
+    const { data: newProfile } = await window.supabaseClient.from('profiles').insert({
+      id: user.id, full_name: user.email.split('@')[0], role: isFirst ? 'super_admin' : 'teacher'
+    }).select().single();
+    state.profile = newProfile || { id: user.id, full_name: user.email.split('@')[0], role: 'teacher' };
+  } else {
+    state.profile = profile;
+  }
+}
+
+async function login(email, password) {
+  const { data, error } = await window.supabaseClient.auth.signInWithPassword({ email, password });
+  if (error) { toast(error.message, 'error'); return; }
+  await loadProfile(data.user);
+  toast('Login berhasil!', 'success');
+  renderApp();
+}
+
+async function register(email, password, name, role = 'teacher') {
+  const { data, error } = await window.supabaseClient.auth.signUp({
+    email, password, options: { data: { full_name: name } }
+  });
+  if (error) { toast(error.message, 'error'); return; }
+  
+  const isFirst = (await window.supabaseClient.from('profiles').select('id', { count: 'exact', head: true })).count === 0;
+  await window.supabaseClient.from('profiles').insert({
+    id: data.user.id, full_name: name, role: isFirst ? 'super_admin' : role
+  });
+  
+  toast(`Registrasi berhasil! Role: ${isFirst ? 'super_admin' : role}. Silakan login.`, 'success');
+  renderLogin();
+}
+
+async function logout() {
+  await window.supabaseClient.auth.signOut();
+  state.user = null;
+  state.profile = null;
+  renderLogin();
+}
+
+// ============================================================
+// LOGIN PAGE
+// ============================================================
+function renderLogin() {
+  $('#app').innerHTML = `
+    <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;background:linear-gradient(135deg,#1E3A8A,#1D4ED8);">
+      <div style="background:white;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,0.3);padding:30px;width:100%;max-width:420px;" class="fade-in">
+        <div style="text-align:center;margin-bottom:25px;">
+          <div style="width:60px;height:60px;background:#F59E0B;border-radius:16px;margin:0 auto 15px;display:flex;align-items:center;justify-content:center;color:white;font-size:24px;font-weight:bold;">S</div>
+          <h1 style="color:#1E3A8A;font-size:24px;font-weight:bold;">SchoolPro</h1>
+          <p style="color:#64748B;font-size:14px;">Sistem Manajemen Sekolah</p>
+        </div>
+        
+        <div style="display:flex;gap:8px;margin-bottom:20px;background:#F1F5F9;padding:4px;border-radius:8px;">
+          <button onclick="switchAuthTab('login')" id="tab-login" style="flex:1;padding:8px;border:none;border-radius:6px;background:white;font-weight:600;font-size:14px;box-shadow:0 1px 3px rgba(0,0,0,0.1);cursor:pointer;">Login</button>
+          <button onclick="switchAuthTab('register')" id="tab-register" style="flex:1;padding:8px;border:none;border-radius:6px;background:transparent;font-size:14px;cursor:pointer;">Register</button>
+        </div>
+        
+        <form id="login-form" style="display:flex;flex-direction:column;gap:12px;">
+          <div>
+            <label style="font-size:14px;font-weight:600;display:block;margin-bottom:4px;">Email</label>
+            <input type="email" id="login-email" required placeholder="admin@school.id" style="width:100%;padding:10px 12px;border:1px solid #D1D5DB;border-radius:8px;box-sizing:border-box;">
+          </div>
+          <div>
+            <label style="font-size:14px;font-weight:600;display:block;margin-bottom:4px;">Password</label>
+            <input type="password" id="login-password" required minlength="6" placeholder="••••••••" style="width:100%;padding:10px 12px;border:1px solid #D1D5DB;border-radius:8px;box-sizing:border-box;">
+          </div>
+          <button type="submit" style="background:#1E3A8A;color:white;padding:12px;border:none;border-radius:8px;font-weight:600;cursor:pointer;">Login</button>
+        </form>
+        
+        <form id="register-form" style="display:none;flex-direction:column;gap:12px;">
+          <div><label style="font-size:14px;font-weight:600;">Nama</label><input type="text" id="reg-name" required style="width:100%;padding:10px 12px;border:1px solid #D1D5DB;border-radius:8px;box-sizing:border-box;"></div>
+          <div><label style="font-size:14px;font-weight:600;">Email</label><input type="email" id="reg-email" required style="width:100%;padding:10px 12px;border:1px solid #D1D5DB;border-radius:8px;box-sizing:border-box;"></div>
+          <div><label style="font-size:14px;font-weight:600;">Password</label><input type="password" id="reg-password" required minlength="6" style="width:100%;padding:10px 12px;border:1px solid #D1D5DB;border-radius:8px;box-sizing:border-box;"></div>
+          <div><label style="font-size:14px;font-weight:600;">Role</label>
+            <select id="reg-role" style="width:100%;padding:10px 12px;border:1px solid #D1D5DB;border-radius:8px;box-sizing:border-box;">
+              <option value="teacher">Guru Mapel</option>
+              <option value="homeroom">Wali Kelas</option>
+              <option value="admin">Admin</option>
+              <option value="super_admin">Super Admin</option>
+            </select>
+          </div>
+          <button type="submit" style="background:#F59E0B;color:white;padding:12px;border:none;border-radius:8px;font-weight:600;cursor:pointer;">Daftar</button>
+        </form>
+        
+        <div style="margin-top:20px;padding:12px;background:#EFF6FF;border-radius:8px;font-size:12px;color:#1E40AF;">
+          💡 Akun pertama otomatis jadi <strong>Super Admin</strong>
+        </div>
+      </div>
+    </div>
+  `;
+  
+  $('#login-form').onsubmit = (e) => { e.preventDefault(); login($('#login-email').value, $('#login-password').value); };
+  $('#register-form').onsubmit = (e) => { e.preventDefault(); register($('#reg-email').value, $('#reg-password').value, $('#reg-name').value, $('#reg-role').value); };
+}
+
+function switchAuthTab(tab) {
+  $('#login-form').style.display = tab === 'login' ? 'flex' : 'none';
+  $('#register-form').style.display = tab === 'register' ? 'flex' : 'none';
+  $('#tab-login').style.background = tab === 'login' ? 'white' : 'transparent';
+  $('#tab-login').style.fontWeight = tab === 'login' ? '600' : '400';
+  $('#tab-register').style.background = tab === 'register' ? 'white' : 'transparent';
+  $('#tab-register').style.fontWeight = tab === 'register' ? '600' : '400';
+}
+
+// ============================================================
+// MAIN APP
+// ============================================================
+function renderApp() {
+  const role = state.profile?.role || 'teacher';
+  const menu = getMenuForRole(role);
+  
+  $('#app').innerHTML = `
+    <button onclick="toggleSidebar()" style="position:fixed;top:16px;left:16px;z-index:50;padding:8px 12px;background:#1E3A8A;color:white;border:none;border-radius:8px;cursor:pointer;" class="lg:hidden">☰</button>
+    
+    <aside id="sidebar" style="position:fixed;top:0;left:0;height:100%;background:#1E3A8A;color:white;z-index:40;width:256px;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,0.2);transform:translateX(${state.sidebarOpen ? '0' : '-100%'});" class="sidebar-transition">
+      <div style="height:64px;display:flex;align-items:center;padding:0 16px;border-bottom:1px solid rgba(255,255,255,0.1);">
+        <div style="width:32px;height:32px;background:#F59E0B;border-radius:8px;display:flex;align-items:center;justify-content:center;font-weight:bold;margin-right:8px;">S</div>
+        <span style="font-weight:bold;">SchoolPro</span>
+      </div>
+      
+      <div style="padding:12px 16px;border-bottom:1px solid rgba(255,255,255,0.1);">
+        <div style="display:flex;align-items:center;gap:12px;">
+          <div style="width:40px;height:40px;border-radius:50%;background:#F59E0B;display:flex;align-items:center;justify-content:center;font-weight:bold;">
+            ${(state.profile?.full_name || 'U')[0].toUpperCase()}
+          </div>
+          <div style="flex:1;min-width:0;">
+            <p style="font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${state.profile?.full_name || '-'}</p>
+            <p style="font-size:12px;opacity:0.7;text-transform:capitalize;">${role.replace('_',' ')}</p>
+          </div>
+        </div>
+      </div>
+      
+      <nav style="flex:1;overflow-y:auto;padding:16px 0;" id="sidebar-menu">
+        ${menu.map(item => `
+          <a onclick="navigateTo('${item.page}')" style="display:flex;align-items:center;gap:12px;padding:12px 16px;margin:0 8px;border-radius:8px;cursor:pointer;${state.currentPage === item.page ? 'background:#F59E0B;color:#1E3A8A;font-weight:600;' : 'color:rgba(255,255,255,0.9);'}" class="menu-item">
+            <span style="font-size:18px;">${item.icon}</span>
+            <span style="font-size:14px;">${item.label}</span>
+          </a>
+        `).join('')}
+      </nav>
+      
+      <div style="padding:16px;border-top:1px solid rgba(255,255,255,0.1);">
+        <button onclick="toggleDarkMode()" style="width:100%;display:flex;align-items:center;gap:12px;padding:8px 12px;background:transparent;color:white;border:none;border-radius:8px;cursor:pointer;font-size:14px;margin-bottom:4px;">
+          <span>${state.darkMode ? '☀️' : '🌙'}</span>
+          <span>${state.darkMode ? 'Light Mode' : 'Dark Mode'}</span>
+        </button>
+        <button onclick="logout()" style="width:100%;display:flex;align-items:center;gap:12px;padding:8px 12px;background:transparent;color:white;border:none;border-radius:8px;cursor:pointer;font-size:14px;">
+          <span>🚪</span><span>Keluar</span>
+        </button>
+      </div>
+    </aside>
+    
+    <main id="main-content" style="margin-left:${state.sidebarOpen ? '256px' : '0'};min-height:100vh;" class="sidebar-transition">
+      <div id="page-content" style="padding:16px;" class="fade-in"></div>
+    </main>
+  `;
+  
+  if (window.innerWidth >= 1024) {
+    $('#sidebar').style.transform = 'translateX(0)';
+    $('#main-content').style.marginLeft = '256px';
+  }
+  
+  navigateTo(state.currentPage);
+}
+
+function toggleSidebar() {
+  state.sidebarOpen = !state.sidebarOpen;
+  $('#sidebar').style.transform = `translateX(${state.sidebarOpen ? '0' : '-100%'})`;
+  $('#main-content').style.marginLeft = state.sidebarOpen ? '256px' : '0';
+}
+
+function toggleDarkMode() {
+  state.darkMode = !state.darkMode;
+  document.documentElement.classList.toggle('dark');
+  localStorage.setItem('darkMode', state.darkMode);
+  renderApp();
+}
+
+function navigateTo(page) {
+  state.currentPage = page;
+  renderPage(page);
+}
+
+function getMenuForRole(role) {
+  const menus = {
+    super_admin: [
+      { page:'dashboard', icon:'📊', label:'Dashboard' },
+      { page:'teachers', icon:'👨‍🏫', label:'Data Guru' },
+      { page:'students', icon:'👨‍🎓', label:'Data Siswa' },
+      { page:'classes', icon:'🏫', label:'Kelas' },
+      { page:'qrcodes', icon:'🔲', label:'QR Code' },
+      { page:'reports', icon:'📈', label:'Laporan' }
+    ],
+    homeroom: [
+      { page:'dashboard', icon:'📊', label:'Dashboard' },
+      { page:'seating', icon:'💺', label:'Denah Duduk' },
+      { page:'organigram', icon:'🌳', label:'Struktur Kelas' },
+      { page:'notes', icon:'📝', label:'Catatan Siswa' }
+    ],
+    teacher: [
+      { page:'dashboard', icon:'📊', label:'Dashboard' },
+      { page:'attendance-input', icon:'✅', label:'Input Kehadiran' },
+      { page:'scan-qr', icon:'📷', label:'Scan QR' }
+    ]
+  };
+  return menus[role] || menus.teacher;
+}
+
+async function renderPage(page) {
+  const content = $('#page-content');
+  content.innerHTML = '<div style="display:flex;justify-content:center;padding:40px;"><div class="loader"></div></div>';
+  
+  try {
+    const pages = {
+      'dashboard': renderDashboard,
+      'teachers': renderTeachers,
+      'students': renderStudents,
+      'classes': renderClasses,
+      'qrcodes': renderQRCodes,
+      'reports': renderReports,
+      'seating': renderSeating,
+      'organigram': renderOrganigram,
+      'notes': renderNotes,
+      'attendance-input': renderAttendanceInput,
+      'scan-qr': renderScanQR
+    };
+    
+    if (pages[page]) await pages[page]();
+    else content.innerHTML = '<p>Halaman tidak ditemukan</p>';
+  } catch (err) {
+    DEBUG.log(`Page error: ${err.message}`, 'error');
+    content.innerHTML = `<div class="error-box"><h2>Error</h2><p>${err.message}</p></div>`;
+  }
+}
+
+// ============================================================
+// DASHBOARD
+// ============================================================
+async function renderDashboard() {
+  const content = $('#page-content');
+  const [teachers, students, classes, todayAtt] = await Promise.all([
+    window.supabaseClient.from('teachers').select('id', { count:'exact', head:true }),
+    window.supabaseClient.from('students').select('id', { count:'exact', head:true }),
+    window.supabaseClient.from('classes').select('id', { count:'exact', head:true }),
+    window.supabaseClient.from('attendance_details').select('id', { count:'exact', head:true })
+      .eq('status', 'hadir').gte('created_at', new Date().toISOString().split('T')[0]+'T00:00:00')
+  ]);
+  
+  content.innerHTML = `
+    <h1 style="font-size:28px;font-weight:bold;color:#1E3A8A;margin-bottom:4px;">Dashboard</h1>
+    <p style="color:#64748B;margin-bottom:24px;">${formatDate(new Date())}</p>
+    
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px;">
+      ${[
+        { label:'Total Guru', value: teachers.count, icon:'👨‍🏫', color:'#1E3A8A' },
+        { label:'Total Siswa', value: students.count, icon:'👨‍🎓', color:'#2563EB' },
+        { label:'Total Kelas', value: classes.count, icon:'🏫', color:'#F59E0B' },
+        { label:'Hadir Hari Ini', value: todayAtt.count, icon:'✅', color:'#10B981' }
+      ].map(c => `
+        <div style="background:white;padding:20px;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+          <div style="width:40px;height:40px;background:${c.color};border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:20px;margin-bottom:12px;">${c.icon}</div>
+          <p style="font-size:24px;font-weight:bold;">${c.value || 0}</p>
+          <p style="font-size:14px;color:#64748B;">${c.label}</p>
+        </div>
+      `).join('')}
+    </div>
+    
+    <div style="background:white;padding:20px;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+      <h3 style="font-weight:600;margin-bottom:16px;">🎉 Selamat Datang!</h3>
+      <p style="color:#64748B;">Aplikasi siap digunakan. Pilih menu di sidebar untuk mulai mengelola data.</p>
+    </div>
+  `;
+}
+
+// ============================================================
+// TEACHERS
+// ============================================================
+async function renderTeachers() {
+  const { data, error } = await window.supabaseClient.from('teachers').select('*').order('name');
+  if (error) throw error;
+  
+  $('#page-content').innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;flex-wrap:wrap;gap:12px;">
+      <h1 style="font-size:28px;font-weight:bold;color:#1E3A8A;">Data Guru</h1>
+      <button onclick="showTeacherForm()" style="padding:10px 16px;background:#1E3A8A;color:white;border:none;border-radius:8px;font-weight:600;cursor:pointer;">+ Tambah</button>
+    </div>
+    
+    <div style="background:white;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.1);overflow:hidden;">
+      <div style="overflow-x:auto;">
+        <table style="width:100%;font-size:14px;">
+          <thead style="background:#F1F5F9;">
+            <tr>
+              <th style="padding:12px;text-align:left;">NIP</th>
+              <th style="padding:12px;text-align:left;">Nama</th>
+              <th style="padding:12px;text-align:left;">Mapel</th>
+              <th style="padding:12px;text-align:left;">Status</th>
+              <th style="padding:12px;text-align:left;">Aksi</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${(data || []).map(t => `
+              <tr style="border-top:1px solid #E5E7EB;">
+                <td style="padding:12px;">${t.nip || '-'}</td>
+                <td style="padding:12px;font-weight:600;">${t.name}</td>
+                <td style="padding:12px;">${t.subject || '-'}</td>
+                <td style="padding:12px;"><span style="padding:4px 8px;font-size:12px;border-radius:12px;${t.is_homeroom ? 'background:#F59E0B;color:white;' : 'background:#E5E7EB;'}">${t.is_homeroom ? 'Wali Kelas' : 'Guru'}</span></td>
+                <td style="padding:12px;">
+                  <button onclick="deleteTeacher('${t.id}')" style="color:#EF4444;background:none;border:none;cursor:pointer;">Hapus</button>
+                </td>
+              </tr>
+            `).join('') || '<tr><td colspan="5" style="padding:24px;text-align:center;color:#64748B;">Belum ada data</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div id="teacher-form-modal"></div>
+  `;
+}
+
+function showTeacherForm() {
+  $('#teacher-form-modal').innerHTML = `
+    <div style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:50;display:flex;align-items:center;justify-content:center;padding:16px;" onclick="if(event.target===this)closeModal()">
+      <div style="background:white;border-radius:12px;padding:24px;width:100%;max-width:400px;">
+        <h2 style="font-size:20px;font-weight:bold;margin-bottom:16px;">Tambah Guru</h2>
+        <form id="form-teacher" style="display:flex;flex-direction:column;gap:12px;">
+          <div><label style="font-size:14px;font-weight:600;">NIP</label><input type="text" id="f-nip" style="width:100%;padding:8px 12px;border:1px solid #D1D5DB;border-radius:8px;margin-top:4px;box-sizing:border-box;"></div>
+          <div><label style="font-size:14px;font-weight:600;">Nama *</label><input type="text" id="f-name" required style="width:100%;padding:8px 12px;border:1px solid #D1D5DB;border-radius:8px;margin-top:4px;box-sizing:border-box;"></div>
+          <div><label style="font-size:14px;font-weight:600;">Mapel</label><input type="text" id="f-subject" style="width:100%;padding:8px 12px;border:1px solid #D1D5DB;border-radius:8px;margin-top:4px;box-sizing:border-box;"></div>
+          <div style="display:flex;gap:8px;">
+            <button type="submit" style="flex:1;padding:10px;background:#1E3A8A;color:white;border:none;border-radius:8px;font-weight:600;cursor:pointer;">Simpan</button>
+            <button type="button" onclick="closeModal()" style="padding:10px 16px;background:#E5E7EB;border:none;border-radius:8px;cursor:pointer;">Batal</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  `;
+  $('#form-teacher').onsubmit = async (e) => {
+    e.preventDefault();
+    const { error } = await window.supabaseClient.from('teachers').insert({
+      nip: $('#f-nip').value || null,
+      name: $('#f-name').value,
+      subject: $('#f-subject').value || null
+    });
+    if (error) { toast(error.message, 'error'); return; }
+    toast('Guru ditambahkan', 'success');
+    closeModal();
+    renderTeachers();
+  };
+}
+
+async function deleteTeacher(id) {
+  if (!confirm('Hapus guru ini?')) return;
+  const { error } = await window.supabaseClient.from('teachers').delete().eq('id', id);
+  if (error) { toast(error.message, 'error'); return; }
+  toast('Dihapus', 'success');
+  renderTeachers();
+}
+
+function closeModal() { $('#teacher-form-modal').innerHTML = ''; }
+
+// ============================================================
+// STUDENTS
+// ============================================================
+async function renderStudents() {
+  const [{ data: students }, { data: classes }] = await Promise.all([
+    window.supabaseClient.from('students').select('*, classes(name)').order('name'),
+    window.supabaseClient.from('classes').select('*').order('name')
+  ]);
+  
+  $('#page-content').innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;flex-wrap:wrap;gap:12px;">
+      <h1 style="font-size:28px;font-weight:bold;color:#1E3A8A;">Data Siswa</h1>
+      <button onclick="showStudentForm()" style="padding:10px 16px;background:#1E3A8A;color:white;border:none;border-radius:8px;font-weight:600;cursor:pointer;">+ Tambah</button>
+    </div>
+    
+    <div style="background:white;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.1);overflow:hidden;">
+      <div style="overflow-x:auto;">
+        <table style="width:100%;font-size:14px;">
+          <thead style="background:#F1F5F9;">
+            <tr>
+              <th style="padding:12px;text-align:left;">NIS</th>
+              <th style="padding:12px;text-align:left;">Nama</th>
+              <th style="padding:12px;text-align:left;">Kelas</th>
+              <th style="padding:12px;text-align:left;">L/P</th>
+              <th style="padding:12px;text-align:left;">QR</th>
+              <th style="padding:12px;text-align:left;">Aksi</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${(students || []).map(s => `
+              <tr style="border-top:1px solid #E5E7EB;">
+                <td style="padding:12px;">${s.nis}</td>
+                <td style="padding:12px;font-weight:600;">${s.name}</td>
+                <td style="padding:12px;">${s.classes?.name || '-'}</td>
+                <td style="padding:12px;">${s.gender || '-'}</td>
+                <td style="padding:12px;">${s.qr_token ? '✅' : '-'}</td>
+                <td style="padding:12px;">
+                  <button onclick="generateStudentQR('${s.id}')" style="color:#10B981;background:none;border:none;cursor:pointer;margin-right:8px;">QR</button>
+                  <button onclick="deleteStudent('${s.id}')" style="color:#EF4444;background:none;border:none;cursor:pointer;">Hapus</button>
+                </td>
+              </tr>
+            `).join('') || '<tr><td colspan="6" style="padding:24px;text-align:center;color:#64748B;">Belum ada data</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div id="student-form-modal"></div>
+  `;
+}
+
+function showStudentForm() {
+  window.supabaseClient.from('classes').select('*').order('name').then(({ data: classes }) => {
+    $('#student-form-modal').innerHTML = `
+      <div style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:50;display:flex;align-items:center;justify-content:center;padding:16px;" onclick="if(event.target===this)closeStudentModal()">
+        <div style="background:white;border-radius:12px;padding:24px;width:100%;max-width:400px;">
+          <h2 style="font-size:20px;font-weight:bold;margin-bottom:16px;">Tambah Siswa</h2>
+          <form id="form-student" style="display:flex;flex-direction:column;gap:12px;">
+            <div><label style="font-size:14px;font-weight:600;">NIS *</label><input type="text" id="s-nis" required style="width:100%;padding:8px 12px;border:1px solid #D1D5DB;border-radius:8px;margin-top:4px;box-sizing:border-box;"></div>
+            <div><label style="font-size:14px;font-weight:600;">Nama *</label><input type="text" id="s-name" required style="width:100%;padding:8px 12px;border:1px solid #D1D5DB;border-radius:8px;margin-top:4px;box-sizing:border-box;"></div>
+            <div><label style="font-size:14px;font-weight:600;">Kelas</label>
+              <select id="s-class" style="width:100%;padding:8px 12px;border:1px solid #D1D5DB;border-radius:8px;margin-top:4px;box-sizing:border-box;">
+                <option value="">-- Pilih --</option>
+                ${(classes || []).map(c => `<option value="${c.id}">${c.name}</option>`).join('')}
+              </select>
+            </div>
+            <div><label style="font-size:14px;font-weight:600;">Gender</label>
+              <select id="s-gender" style="width:100%;padding:8px 12px;border:1px solid #D1D5DB;border-radius:8px;margin-top:4px;box-sizing:border-box;">
+                <option value="L">Laki-laki</option>
+                <option value="P">Perempuan</option>
+              </select>
+            </div>
+            <div><label style="font-size:14px;font-weight:600;">No. WA Ortu</label><input type="text" id="s-pphone" placeholder="628xxx" style="width:100%;padding:8px 12px;border:1px solid #D1D5DB;border-radius:8px;margin-top:4px;box-sizing:border-box;"></div>
+            <div style="display:flex;gap:8px;">
+              <button type="submit" style="flex:1;padding:10px;background:#1E3A8A;color:white;border:none;border-radius:8px;font-weight:600;cursor:pointer;">Simpan</button>
+              <button type="button" onclick="closeStudentModal()" style="padding:10px
