@@ -25,8 +25,8 @@
 <!-- Supabase -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
-<!-- QR Code - FIXED: pakai qrcode-generator yang reliable -->
-<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+<!-- QR Code Generator - CDN PALING RELIABLE -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
 
 <!-- QR Scanner -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
@@ -45,7 +45,7 @@
   .fade-in { animation: fadeIn 0.3s ease-in; }
   @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
   .sidebar-transition { transition: all 0.3s ease; }
-  .error-box { background: #FEF2F2; border: 2px solid #FCA5A5; color: #991B1B; padding: 20px; border-radius: 12px; max-width: 600px; margin: 40px auto; font-family: monospace; }
+  .error-box { background: #FEF2F2; border: 2px solid #FCA5A5; color: #991B1B; padding: 20px; border-radius: 12px; max-width: 600px; margin: 40px auto; }
   .error-box h2 { color: #DC2626; margin-bottom: 10px; }
   .warning-box { background: #FFFBEB; border: 2px solid #FCD34D; color: #92400E; padding: 20px; border-radius: 12px; max-width: 600px; margin: 40px auto; }
 </style>
@@ -57,7 +57,7 @@
   <div style="text-align:center;color:white;">
     <div class="loader" style="margin:0 auto 20px;border-top-color:#F59E0B;"></div>
     <h2 style="font-size:24px;font-weight:bold;">SchoolPro</h2>
-    <p style="opacity:0.8;margin-top:8px;">Memuat aplikasi...</p>
+    <p style="opacity:0.8;margin-top:8px;" id="loading-status">Memuat aplikasi...</p>
   </div>
 </div>
 
@@ -101,29 +101,36 @@ window.addEventListener('unhandledrejection', (e) => {
 });
 
 // ============================================================
-// QR CODE HELPER - pakai qrcode-generator
+// QR CODE HELPER - pakai qrcode-generator (lowercase)
 // ============================================================
+let QR_AVAILABLE = false;
+
+function checkQRAvailable() {
+  // qrcode-generator expose global `qrcode` (lowercase)
+  QR_AVAILABLE = typeof window.qrcode === 'function';
+  DEBUG.log(`QRCode library available: ${QR_AVAILABLE}`, QR_AVAILABLE ? 'success' : 'warn');
+  return QR_AVAILABLE;
+}
+
 function generateQRCode(container, text, size = 120) {
+  if (!QR_AVAILABLE) {
+    container.innerHTML = '<p style="color:#94A3B8;font-size:10px;text-align:center;">QR library tidak tersedia</p>';
+    return false;
+  }
   try {
-    // qrcode-generator API
-    const typeNumber = 4;
-    const errorCorrectionLevel = 'L';
-    const qr = qrcode(typeNumber, errorCorrectionLevel);
+    const qr = window.qrcode(0, 'M'); // type 0 = auto, M = medium error correction
     qr.addData(text);
     qr.make();
     
-    // Clear container
     container.innerHTML = '';
-    
-    // Create image
     const img = document.createElement('img');
-    img.src = qr.createDataURL(4, 0); // cell size, margin
+    img.src = qr.createDataURL(4, 2); // cell size 4, margin 2
     img.width = size;
     img.height = size;
     img.style.display = 'block';
     img.style.margin = '0 auto';
+    img.style.borderRadius = '4px';
     container.appendChild(img);
-    
     return true;
   } catch (err) {
     DEBUG.log(`QR generate error: ${err.message}`, 'error');
@@ -147,40 +154,46 @@ function showError(title, message) {
 }
 
 // ============================================================
-// CHECK DEPENDENCIES - FIXED
+// CHECK DEPENDENCIES - FIXED (tidak block app jika QR gagal)
 // ============================================================
 function checkDependencies() {
   DEBUG.log('Checking dependencies...', 'info');
-  const missing = [];
+  const critical = [];
+  const optional = [];
   
-  if (typeof window.supabase === 'undefined') missing.push('Supabase JS');
-  if (typeof qrcode === 'undefined') missing.push('QRCode Generator');
-  if (typeof Chart === 'undefined') missing.push('Chart.js');
-  if (typeof XLSX === 'undefined') missing.push('XLSX library');
+  // Critical - app tidak bisa jalan tanpa ini
+  if (typeof window.supabase === 'undefined') critical.push('Supabase JS');
+  if (typeof Chart === 'undefined') critical.push('Chart.js');
+  if (typeof XLSX === 'undefined') critical.push('XLSX library');
   
-  // html5-qrcode optional (hanya untuk scan)
-  const hasScanner = typeof Html5Qrcode !== 'undefined';
-  DEBUG.log(`QR Scanner available: ${hasScanner}`, hasScanner ? 'success' : 'warn');
+  // Optional - app tetap jalan, fitur tertentu di-disable
+  if (!checkQRAvailable()) optional.push('QRCode Generator (fitur QR dinonaktifkan)');
+  if (typeof Html5Qrcode === 'undefined') optional.push('HTML5 QR Scanner (fitur scan dinonaktifkan)');
   
-  if (missing.length > 0) {
-    DEBUG.log(`Missing: ${missing.join(', ')}`, 'error');
-    showError('Library Tidak Terload', `
-      Library berikut gagal dimuat:<br>
+  if (critical.length > 0) {
+    DEBUG.log(`CRITICAL missing: ${critical.join(', ')}`, 'error');
+    showError('Library Penting Tidak Terload', `
+      <p>Library berikut <strong>WAJIB</strong> ada:</p>
       <ul style="margin:10px 0;">
-        ${missing.map(m => `<li>❌ ${m}</li>`).join('')}
+        ${critical.map(m => `<li>❌ ${m}</li>`).join('')}
       </ul>
       <p><strong>Solusi:</strong></p>
       <ol style="margin-left:20px;">
         <li>Pastikan internet aktif</li>
-        <li>Cek apakah ada adblocker yang memblokir CDN</li>
-        <li>Coba refresh halaman (Ctrl+F5)</li>
+        <li>Matikan adblocker / antivirus</li>
+        <li>Refresh dengan <kbd>Ctrl+F5</kbd></li>
         <li>Coba browser lain (Chrome/Edge/Firefox)</li>
+        <li>Jangan buka via <code>file://</code> - pakai Live Server</li>
       </ol>
     `);
     return false;
   }
   
-  DEBUG.log('All dependencies loaded ✓', 'success');
+  if (optional.length > 0) {
+    DEBUG.log(`Optional missing: ${optional.join(', ')}`, 'warn');
+  }
+  
+  DEBUG.log('All critical dependencies loaded ✓', 'success');
   return true;
 }
 
@@ -233,11 +246,16 @@ function formatDate(d) {
 // ============================================================
 async function initApp() {
   DEBUG.log('App initializing...', 'info');
+  $('#loading-status').textContent = 'Memeriksa library...';
   
   try {
+    // Small delay biar loading screen terlihat
+    await new Promise(r => setTimeout(r, 300));
+    
     if (!checkDependencies()) return;
     
-    DEBUG.log('Checking config...', 'info');
+    $('#loading-status').textContent = 'Memeriksa konfigurasi...';
+    
     if (CONFIG.SUPABASE_URL.includes('YOUR-PROJECT') || CONFIG.SUPABASE_ANON_KEY.includes('YOUR-ANON')) {
       document.getElementById('loading-screen').style.display = 'none';
       document.getElementById('app').innerHTML = `
@@ -258,6 +276,7 @@ async function initApp() {
       return;
     }
     
+    $('#loading-status').textContent = 'Menghubungkan ke database...';
     DEBUG.log('Initializing Supabase...', 'info');
     window.supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
     
@@ -283,6 +302,7 @@ async function initApp() {
     }
     
     DEBUG.log('Connection OK ✓', 'success');
+    $('#loading-status').textContent = 'Memuat sesi...';
     
     const { data: { session } } = await window.supabaseClient.auth.getSession();
     
@@ -299,7 +319,7 @@ async function initApp() {
     
   } catch (err) {
     DEBUG.log(`Init error: ${err.message}`, 'error');
-    showError('Error', `<p>${err.message}</p><pre>${err.stack || ''}</pre>`);
+    showError('Error', `<p>${err.message}</p><pre style="background:#FEE2E2;padding:10px;border-radius:6px;overflow-x:auto;font-size:12px;">${err.stack || ''}</pre>`);
   }
 }
 
@@ -581,8 +601,9 @@ async function renderDashboard() {
     </div>
     
     <div style="background:white;padding:20px;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
-      <h3 style="font-weight:600;margin-bottom:16px;">🎉 Selamat Datang!</h3>
-      <p style="color:#64748B;">Aplikasi siap digunakan. Pilih menu di sidebar untuk mulai mengelola data.</p>
+      <h3 style="font-weight:600;margin-bottom:16px;">🎉 Selamat Datang di SchoolPro!</h3>
+      <p style="color:#64748B;">Aplikasi siap digunakan. Silakan pilih menu di sidebar untuk mulai mengelola data sekolah.</p>
+      ${!QR_AVAILABLE ? '<p style="margin-top:10px;color:#F59E0B;font-size:13px;">⚠️ Library QR Code tidak terload. Fitur QR akan dinonaktifkan. Tekan Ctrl+Shift+D untuk detail.</p>' : ''}
     </div>
   `;
 }
@@ -747,4 +768,184 @@ function showStudentForm() {
             <div><label style="font-size:14px;font-weight:600;">No. WA Ortu</label><input type="text" id="s-pphone" placeholder="628xxx" style="width:100%;padding:8px 12px;border:1px solid #D1D5DB;border-radius:8px;margin-top:4px;box-sizing:border-box;"></div>
             <div style="display:flex;gap:8px;">
               <button type="submit" style="flex:1;padding:10px;background:#1E3A8A;color:white;border:none;border-radius:8px;font-weight:600;cursor:pointer;">Simpan</button>
-              <button type="button" onclick="closeStudentModal()" style="padding:10px
+              <button type="button" onclick="closeStudentModal()" style="padding:10px 16px;background:#E5E7EB;border:none;border-radius:8px;cursor:pointer;">Batal</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    `;
+    $('#form-student').onsubmit = async (e) => {
+      e.preventDefault();
+      const { error } = await window.supabaseClient.from('students').insert({
+        nis: $('#s-nis').value, name: $('#s-name').value,
+        class_id: $('#s-class').value || null, gender: $('#s-gender').value,
+        parent_phone: $('#s-pphone').value || null
+      });
+      if (error) { toast(error.message, 'error'); return; }
+      toast('Siswa ditambahkan', 'success');
+      closeStudentModal();
+      renderStudents();
+    };
+  });
+}
+
+function closeStudentModal() { $('#student-form-modal').innerHTML = ''; }
+
+async function deleteStudent(id) {
+  if (!confirm('Hapus siswa?')) return;
+  const { error } = await window.supabaseClient.from('students').delete().eq('id', id);
+  if (error) { toast(error.message, 'error'); return; }
+  toast('Dihapus', 'success');
+  renderStudents();
+}
+
+async function generateStudentQR(id) {
+  if (!QR_AVAILABLE) { toast('Library QR tidak tersedia', 'error'); return; }
+  const { data: s } = await window.supabaseClient.from('students').select('*').eq('id', id).single();
+  const token = btoa(JSON.stringify({ uuid: s.id, nis: s.nis, name: s.name, iat: Date.now() }));
+  const { error } = await window.supabaseClient.from('students').update({ qr_token: token }).eq('id', id);
+  if (error) { toast(error.message, 'error'); return; }
+  toast('QR digenerate!', 'success');
+  renderStudents();
+}
+
+// ============================================================
+// CLASSES
+// ============================================================
+async function renderClasses() {
+  const { data } = await window.supabaseClient.from('classes').select('*').order('name');
+  
+  $('#page-content').innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;flex-wrap:wrap;gap:12px;">
+      <h1 style="font-size:28px;font-weight:bold;color:#1E3A8A;">Data Kelas</h1>
+      <button onclick="showClassForm()" style="padding:10px 16px;background:#1E3A8A;color:white;border:none;border-radius:8px;font-weight:600;cursor:pointer;">+ Tambah</button>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:16px;">
+      ${(data || []).map(c => `
+        <div style="background:white;padding:20px;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+          <h3 style="font-size:18px;font-weight:bold;color:#1E3A8A;">${c.name}</h3>
+          <p style="font-size:13px;color:#64748B;">Level: ${c.level || '-'} • Ruang: ${c.room || '-'}</p>
+        </div>
+      `).join('') || '<p style="color:#64748B;">Belum ada kelas</p>'}
+    </div>
+    <div id="class-form-modal"></div>
+  `;
+}
+
+function showClassForm() {
+  $('#class-form-modal').innerHTML = `
+    <div style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:50;display:flex;align-items:center;justify-content:center;padding:16px;" onclick="if(event.target===this)$('#class-form-modal').innerHTML=''">
+      <div style="background:white;border-radius:12px;padding:24px;width:100%;max-width:400px;">
+        <h2 style="font-size:20px;font-weight:bold;margin-bottom:16px;">Tambah Kelas</h2>
+        <form id="form-class" style="display:flex;flex-direction:column;gap:12px;">
+          <div><label style="font-size:14px;font-weight:600;">Nama *</label><input type="text" id="c-name" required style="width:100%;padding:8px 12px;border:1px solid #D1D5DB;border-radius:8px;margin-top:4px;box-sizing:border-box;"></div>
+          <div><label style="font-size:14px;font-weight:600;">Level</label><input type="text" id="c-level" placeholder="X, XI, XII" style="width:100%;padding:8px 12px;border:1px solid #D1D5DB;border-radius:8px;margin-top:4px;box-sizing:border-box;"></div>
+          <div><label style="font-size:14px;font-weight:600;">Ruang</label><input type="text" id="c-room" style="width:100%;padding:8px 12px;border:1px solid #D1D5DB;border-radius:8px;margin-top:4px;box-sizing:border-box;"></div>
+          <div style="display:flex;gap:8px;">
+            <button type="submit" style="flex:1;padding:10px;background:#1E3A8A;color:white;border:none;border-radius:8px;font-weight:600;cursor:pointer;">Simpan</button>
+            <button type="button" onclick="$('#class-form-modal').innerHTML=''" style="padding:10px 16px;background:#E5E7EB;border:none;border-radius:8px;cursor:pointer;">Batal</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  `;
+  $('#form-class').onsubmit = async (e) => {
+    e.preventDefault();
+    const { error } = await window.supabaseClient.from('classes').insert({
+      name: $('#c-name').value, level: $('#c-level').value, room: $('#c-room').value
+    });
+    if (error) { toast(error.message, 'error'); return; }
+    toast('Kelas ditambahkan', 'success');
+    $('#class-form-modal').innerHTML = '';
+    renderClasses();
+  };
+}
+
+// ============================================================
+// QR CODES PAGE
+// ============================================================
+async function renderQRCodes() {
+  const { data: students } = await window.supabaseClient.from('students').select('*, classes(name)').order('name');
+  
+  $('#page-content').innerHTML = `
+    <h1 style="font-size:28px;font-weight:bold;color:#1E3A8A;margin-bottom:4px;">QR Code Siswa</h1>
+    <p style="color:#64748B;margin-bottom:24px;">Generate & cetak QR Code untuk absensi</p>
+    
+    ${!QR_AVAILABLE ? `
+      <div style="background:#FEF2F2;border:2px solid #FCA5A5;color:#991B1B;padding:16px;border-radius:12px;margin-bottom:16px;">
+        <strong>⚠️ Library QR Code tidak tersedia.</strong><br>
+        Fitur QR dinonaktifkan. Pastikan internet aktif dan refresh halaman (Ctrl+F5).
+      </div>
+    ` : ''}
+    
+    <div style="background:white;padding:16px;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.1);margin-bottom:16px;">
+      <button onclick="generateAllQR()" ${!QR_AVAILABLE ? 'disabled style="opacity:0.5;cursor:not-allowed;"' : ''} style="padding:10px 16px;background:#F59E0B;color:white;border:none;border-radius:8px;font-weight:600;cursor:pointer;">🔄 Generate Semua QR</button>
+    </div>
+    
+    <div id="qr-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:16px;">
+      ${(students || []).map(s => `
+        <div style="background:white;padding:12px;border-radius:12px;border:1px solid #E5E7EB;text-align:center;" id="qr-${s.id}">
+          <div class="qr-canvas" data-token="${s.qr_token || ''}" style="background:white;padding:8px;border-radius:8px;margin-bottom:8px;min-height:120px;display:flex;align-items:center;justify-content:center;"></div>
+          <p style="font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${s.name}</p>
+          <p style="font-size:10px;color:#64748B;">${s.nis} • ${s.classes?.name || ''}</p>
+        </div>
+      `).join('') || '<p style="color:#64748B;">Belum ada siswa</p>'}
+    </div>
+  `;
+  
+  // Render QR codes
+  if (QR_AVAILABLE) {
+    $$('.qr-canvas').forEach(canvas => {
+      const token = canvas.dataset.token;
+      if (token) {
+        generateQRCode(canvas, token, 120);
+      } else {
+        canvas.innerHTML = '<p style="font-size:10px;color:#94A3B8;">No QR</p>';
+      }
+    });
+  }
+}
+
+async function generateAllQR() {
+  if (!QR_AVAILABLE) { toast('Library QR tidak tersedia', 'error'); return; }
+  const { data: students } = await window.supabaseClient.from('students').select('id, nis, name');
+  if (!students?.length) { toast('Tidak ada siswa', 'warning'); return; }
+  
+  toast('Generating...', 'info');
+  let count = 0;
+  for (const s of students) {
+    if (!s.nis) continue;
+    const token = btoa(JSON.stringify({ uuid: s.id, nis: s.nis, name: s.name, iat: Date.now() }));
+    await window.supabaseClient.from('students').update({ qr_token: token }).eq('id', s.id);
+    count++;
+  }
+  toast(`${count} QR digenerate`, 'success');
+  renderQRCodes();
+}
+
+// ============================================================
+// PLACEHOLDER PAGES
+// ============================================================
+async function renderReports() { $('#page-content').innerHTML = '<h1 style="font-size:28px;font-weight:bold;color:#1E3A8A;">Laporan</h1><p style="color:#64748B;">Fitur laporan akan segera tersedia.</p>'; }
+async function renderSeating() { $('#page-content').innerHTML = '<h1 style="font-size:28px;font-weight:bold;color:#1E3A8A;">Denah Duduk</h1><p style="color:#64748B;">Fitur denah duduk akan segera tersedia.</p>'; }
+async function renderOrganigram() { $('#page-content').innerHTML = '<h1 style="font-size:28px;font-weight:bold;color:#1E3A8A;">Organigram</h1><p style="color:#64748B;">Fitur organigram akan segera tersedia.</p>'; }
+async function renderNotes() { $('#page-content').innerHTML = '<h1 style="font-size:28px;font-weight:bold;color:#1E3A8A;">Catatan Siswa</h1><p style="color:#64748B;">Fitur catatan akan segera tersedia.</p>'; }
+async function renderAttendanceInput() { $('#page-content').innerHTML = '<h1 style="font-size:28px;font-weight:bold;color:#1E3A8A;">Input Kehadiran</h1><p style="color:#64748B;">Fitur absensi akan segera tersedia.</p>'; }
+async function renderScanQR() { $('#page-content').innerHTML = '<h1 style="font-size:28px;font-weight:bold;color:#1E3A8A;">Scan QR</h1><p style="color:#64748B;">Fitur scan QR akan segera tersedia.</p>'; }
+
+// ============================================================
+// START
+// ============================================================
+DEBUG.log('Starting app...', 'info');
+initApp();
+
+window.addEventListener('resize', () => {
+  if (window.innerWidth >= 1024) {
+    $('#sidebar')?.style.setProperty('transform', 'translateX(0)');
+    $('#main-content')?.style.setProperty('margin-left', '256px');
+  }
+});
+</script>
+
+</body>
+</html>
